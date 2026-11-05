@@ -1,0 +1,61 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // !!! استبدل البريد ببريدك (نفس ADMIN_EMAILS في admin.html) !!!
+    function isAdmin() {
+      return request.auth != null && request.auth.token.email in ['ضع-بريدك@example.com'];
+    }
+    function isStaff() {
+      return request.auth != null && exists(/databases/$(database)/documents/staffUsers/$(request.auth.token.email));
+    }
+
+    match /products/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /orders/{id} {
+      // أي زائر يستطيع إنشاء طلب بالشكل المطلوب فقط
+      allow create: if request.resource.data.keys().hasAll(['fullName', 'phone', 'wilaya', 'commune', 'cartItems', 'finalTotal'])
+                    && request.resource.data.fullName is string && request.resource.data.fullName.size() < 120
+                    && request.resource.data.phone is string && request.resource.data.phone.size() < 30
+                    && request.resource.data.finalTotal is number;
+      allow read, update: if isAdmin() || isStaff();
+      allow delete: if isAdmin();
+    }
+
+    match /settings/{id} {
+      allow read: if true;           // إعدادات عامة فقط (إعلان، عروض، تواصل، بيكسلات)
+      allow write: if isAdmin();
+    }
+
+    match /coupons/{code} {
+      allow get: if true;
+      allow list: if isAdmin() || isStaff();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['used'])
+                                      && request.resource.data.used == resource.data.used + 1);
+    }
+
+    match /tracking/{code} {
+      allow get: if true;            // الكود عشوائي وغير قابل للتخمين، والبيانات لا تحوي معلومات شخصية
+      allow list: if false;
+      allow create: if request.resource.data.keys().hasOnly(['status', 'createdAt', 'total']);
+      allow update: if isAdmin() || isStaff();
+      allow delete: if isAdmin();
+    }
+
+    match /carts/{id} {
+      allow create, update: if request.resource.data.keys().hasOnly(['name', 'phone', 'wilaya', 'items', 'total', 'updatedAt', 'converted'])
+                            && request.resource.data.phone is string && request.resource.data.phone.size() < 25;
+      allow read, delete: if isAdmin() || isStaff();
+    }
+
+    match /private/integrations { allow read, write: if isAdmin(); }
+    match /private/staff { allow read: if isAdmin() || isStaff(); allow write: if isAdmin(); }
+    match /staffUsers/{email} { allow read: if isAdmin() || (request.auth != null && request.auth.token.email == email); allow write: if isAdmin(); }
+
+    match /{document=**} { allow read, write: if isAdmin(); }
+  }
+}
